@@ -70,15 +70,13 @@ struct CIRGenFixedPointBuilder {
     cir::ConstantOp fpConst = builder.getConstFP(loc, opTy, scaleVal);
     result = builder.createFMul(loc, result, fpConst);
 
-    cir::IntType resultTy = cir::IntType::get(
-        builder.getContext(), dstSema.getWidth(), dstSema.isSigned());
-
+    cir::IntType opIntTy = getOpIntType(dstSema);
     if (dstSema.isSaturated()) {
       result = builder.emitIntrinsicCallOp(
-          loc, useSigned ? "fptosi.sat" : "fptoui.sat", resultTy, result);
+          loc, useSigned ? "fptosi.sat" : "fptoui.sat", opIntTy, result);
     } else {
-      result = builder.createCast(loc, cir::CastKind::float_to_int, result,
-                                  resultTy);
+      result =
+          builder.createCast(loc, cir::CastKind::float_to_int, result, opIntTy);
     }
 
     // When saturating unsigned-with-padding using signed operations, we may
@@ -86,7 +84,9 @@ struct CIRGenFixedPointBuilder {
     if (dstSema.isSaturated() && dstSema.hasUnsignedPadding())
       result = clampBelowZero(result);
 
-    return result;
+    return builder.createIntCast(result, cir::IntType::get(builder.getContext(),
+                                                           dstSema.getWidth(),
+                                                           dstSema.isSigned()));
   }
 
   mlir::Value createFixedToInteger(mlir::Value src,
@@ -344,9 +344,10 @@ private:
         result = builder.createSelect(loc, tooLow, min, result);
       }
 
-      // Resize the integer part to get the final destination size.
-      if (resultWidth != dstWidth)
-        result = builder.createIntCast(result, dstIntTy);
+      // Resize the integer part to get the final destination size. Unlike
+      // LLVM integers, CIR integers carry signedness, so also cast when only
+      // the signedness differs.
+      result = builder.createIntCast(result, dstIntTy);
     }
     return result;
   }
